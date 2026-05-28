@@ -7,6 +7,7 @@
 import path from 'path';
 
 import { backfillContainerConfigs } from './backfill-container-configs.js';
+import { syncMentionWhitelists } from './sync-mention-whitelists.js';
 import { DATA_DIR } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
@@ -16,6 +17,7 @@ import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runti
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
+import { getMessagingGroupByPlatform, updateMessagingGroup } from './db/messaging-groups.js';
 import { log } from './log.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -78,6 +80,7 @@ async function main(): Promise<void> {
   // 1b. Backfill container_configs from legacy container.json files.
   // Idempotent — skips groups that already have a config row.
   backfillContainerConfigs();
+  syncMentionWhitelists();
 
   // 1c. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
@@ -122,6 +125,10 @@ async function main(): Promise<void> {
           name,
           isGroup,
         });
+        if (name) {
+          const mg = getMessagingGroupByPlatform(adapter.channelType, platformId);
+          if (mg) updateMessagingGroup(mg.id, { name });
+        }
       },
       onAction(questionId, selectedOption, userId) {
         dispatchResponse({

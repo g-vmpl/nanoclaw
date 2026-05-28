@@ -249,7 +249,8 @@ function formatAttachments(attachments: any[] | undefined): string {
     const localPath = a.localPath ? `/workspace/${a.localPath}` : '';
     const url = a.url || '';
     if (localPath) {
-      return `[${type}: ${escapeXml(name)} — saved to ${escapeXml(localPath)}]`;
+      const readHint = type === 'image' ? ` — use Read tool on this path before responding` : '';
+      return `[${type}: ${escapeXml(name)} at ${escapeXml(localPath)}${readHint}]`;
     }
     return url ? `[${type}: ${escapeXml(name)} (${escapeXml(url)})]` : `[${type}: ${escapeXml(name)}]`;
   });

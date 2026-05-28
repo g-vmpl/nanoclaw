@@ -135,7 +135,9 @@ async function spawnContainer(session: Session): Promise<void> {
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
-  const agentIdentifier = agentGroup.id;
+  // OneCLI requires identifiers to start with a letter; UUIDs that start with
+  // a digit (e.g. "29a848ea-...") get an "ag-" prefix so the constraint holds.
+  const agentIdentifier = /^[a-z]/i.test(agentGroup.id) ? agentGroup.id : `ag-${agentGroup.id}`;
   const args = await buildContainerArgs(
     mounts,
     containerName,
@@ -269,6 +271,13 @@ function buildMounts(
 
   // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
   mounts.push({ hostPath: groupDir, containerPath: '/workspace/agent', readonly: false });
+
+  // Shared attachments dir — inbound media downloaded by channel adapters lands
+  // here. Mounted RO so containers can read (e.g. Read tool on image paths) but
+  // cannot delete or overwrite host-side files.
+  const attachmentsDir = path.join(DATA_DIR, 'attachments');
+  fs.mkdirSync(attachmentsDir, { recursive: true });
+  mounts.push({ hostPath: attachmentsDir, containerPath: '/workspace/attachments', readonly: true });
 
   // container.json — nested RO mount on top of RW group dir so the agent
   // can read its config but cannot modify it.

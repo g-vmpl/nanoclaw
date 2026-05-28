@@ -278,7 +278,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     const agentGroup = getAgentGroup(agent.agent_group_id);
     if (!agentGroup) continue;
 
-    const engages = evaluateEngage(agent, messageText, isMention, mg, event.threadId);
+    const engages = evaluateEngage(agent, messageText, isMention, mg, event.threadId, userId);
 
     const accessOk = engages && (!accessGate || accessGate(event, userId, mg, agent.agent_group_id).allowed);
     const scopeOk = engages && (!senderScopeGate || senderScopeGate(event, userId, mg, agent).allowed);
@@ -367,6 +367,7 @@ function evaluateEngage(
   isMention: boolean,
   mg: MessagingGroup,
   threadId: string | null,
+  userId: string | null,
 ): boolean {
   switch (agent.engage_mode) {
     case 'pattern': {
@@ -379,8 +380,22 @@ function evaluateEngage(
         return true;
       }
     }
-    case 'mention':
-      return isMention;
+    case 'mention': {
+      if (!isMention) return false;
+      // engage_pattern in mention mode = comma-separated sender whitelist.
+      // Each entry is the bare phone/ID portion of the userId (the part
+      // between the channel prefix and the '@' suffix, e.g. '918466971926'
+      // from 'whatsapp:918466971926@s.whatsapp.net'). Empty / '.' = any
+      // sender may trigger.
+      const pat = agent.engage_pattern;
+      if (!pat || pat === '.') return true;
+      const senderRaw = userId?.replace(/^[^:]+:/, '').replace(/@.*$/, '') ?? '';
+      const allowed = pat
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return allowed.includes(senderRaw);
+    }
     case 'mention-sticky': {
       if (isMention) return true;
       // Sticky follow-up: session already exists for this (agent, mg, thread)

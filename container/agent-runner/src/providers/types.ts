@@ -57,6 +57,7 @@ export interface QueryInput {
   systemContext?: {
     instructions?: string;
   };
+
 }
 
 export interface McpServerConfig {

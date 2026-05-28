@@ -10,9 +10,11 @@
  *   pnpm exec tsx scripts/delete-cli-agent.ts --folder <folder-name>
  */
 import fs from 'fs';
+import { execSync } from 'node:child_process';
 import path from 'path';
 
 import { DATA_DIR } from '../src/config.js';
+import { CONTAINER_RUNTIME_BIN } from '../src/container-runtime.js';
 import { getAgentGroupByFolder, deleteAgentGroup } from '../src/db/agent-groups.js';
 import { initDb } from '../src/db/connection.js';
 import { runMigrations } from '../src/db/migrations/index.js';
@@ -59,6 +61,24 @@ const cleanup = db.transaction(() => {
   deleteAgentGroup(ag.id);
 });
 cleanup();
+
+// Stop any running containers for this folder before deleting the directory.
+// Docker bind-mounts block rmdir on macOS if the container is still running.
+try {
+  const running = execSync(
+    `${CONTAINER_RUNTIME_BIN} ps --filter "name=nanoclaw-v2-${args.folder}-" --format "{{.Names}}"`,
+    { stdio: 'pipe' },
+  )
+    .toString()
+    .trim()
+    .split('\n')
+    .filter(Boolean);
+  for (const name of running) {
+    execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
+  }
+} catch {
+  // container runtime not available or no matching containers — proceed anyway
+}
 
 // Remove the groups/<folder>/ directory.
 const groupDir = path.join(process.cwd(), 'groups', args.folder);

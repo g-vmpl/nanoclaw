@@ -107,9 +107,12 @@ export interface MessagingGroupAgent {
   agent_group_id: string;
   engage_mode: EngageMode;
   /**
-   * Regex source string used when engage_mode='pattern'. `'.'` is the sentinel
-   * for "match every message" (the "always" flavor). Ignored for 'mention' /
-   * 'mention-sticky' modes.
+   * Dual-use field:
+   *  - engage_mode='pattern': regex tested against message text. '.' = always.
+   *  - engage_mode='mention': comma-separated sender whitelist. Each entry is
+   *    the bare ID portion of the userId (e.g. '918466971926' from
+   *    'whatsapp:918466971926@s.whatsapp.net'). '.' or null = any sender.
+   * Ignored for 'mention-sticky'.
    */
   engage_pattern: string | null;
   sender_scope: SenderScope;
