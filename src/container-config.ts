@@ -14,6 +14,7 @@ import path from 'path';
 import { GROUPS_DIR } from './config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { getAgentGroup } from './db/agent-groups.js';
+import { readEnvFile } from './env.js';
 import type { AgentGroup, ContainerConfigRow } from './types.js';
 
 export interface McpServerConfig {
@@ -79,6 +80,21 @@ export function materializeContainerJson(agentGroupId: string): ContainerConfig 
   if (!row) throw new Error(`Container config not found for agent group: ${agentGroupId}`);
 
   const config = configFromDb(row, group);
+
+  // Fall back to .env defaults when not set in DB.
+  // Per-agent overrides: AGENT_MODEL_<FOLDER> / AGENT_EFFORT_<FOLDER>
+  // where FOLDER is the group folder uppercased with hyphens replaced by underscores.
+  // e.g. folder "ops-with-netra" → AGENT_MODEL_OPS_WITH_NETRA
+  const folderKey = group.folder.toUpperCase().replace(/-/g, '_');
+  const agentModelKey = `AGENT_MODEL_${folderKey}`;
+  const agentEffortKey = `AGENT_EFFORT_${folderKey}`;
+  const env = readEnvFile(['CLAUDE_MODEL', 'CLAUDE_EFFORT', agentModelKey, agentEffortKey]);
+  if (!config.model) {
+    config.model = env[agentModelKey] || env.CLAUDE_MODEL || 'claude-sonnet-4-5';
+  }
+  if (!config.effort) {
+    config.effort = env[agentEffortKey] || env.CLAUDE_EFFORT || 'medium';
+  }
 
   const p = path.join(GROUPS_DIR, group.folder, 'container.json');
   const dir = path.dirname(p);
