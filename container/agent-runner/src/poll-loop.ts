@@ -447,6 +447,24 @@ async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
+          // Detect Claude subscription auth failure — the CLI returns this as
+          // plain text (not wrapped in <message> blocks) when the OAuth token
+          // is revoked or expired. Write a system-alert so the host can DM the
+          // owner, then break out — no point looping on an auth error.
+          if (event.text.includes('Your organization has disabled Claude subscription access')) {
+            writeMessageOut({
+              id: generateId(),
+              kind: 'system-alert',
+              platform_id: null,
+              channel_type: null,
+              thread_id: null,
+              content: JSON.stringify({
+                type: 'claude-auth-error',
+                error: event.text.trim().slice(0, 300),
+              }),
+            });
+            break;
+          }
           const { hasUnwrapped } = dispatchResultText(event.text, routing);
           if (hasUnwrapped && !unwrappedNudged) {
             unwrappedNudged = true;

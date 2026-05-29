@@ -24,6 +24,7 @@ import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
+import { pickApprover, pickApprovalDelivery } from './modules/approvals/primitive.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 
@@ -33,6 +34,10 @@ const MAX_DELIVERY_ATTEMPTS = 3;
 
 /** Track delivery attempt counts. Resets on process restart (gives failed messages a fresh chance). */
 const deliveryAttempts = new Map<string, number>();
+
+/** Dedup: alert at most once per hour per agent group for auth errors. */
+const authAlertedAt = new Map<string, number>();
+const AUTH_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 
 /**
  * Sessions whose outbound queue is currently being drained.
@@ -257,6 +262,12 @@ async function deliverMessage(
     return;
   }
 
+  // System alerts — route to owner DM, never to the group
+  if (msg.kind === 'system-alert') {
+    await handleSystemAlert(msg.content, session);
+    return;
+  }
+
   // Agent-to-agent — route to target session via the agent-to-agent module.
   // Guarded by the channel_type check. If the module isn't installed the
   // `agent_destinations` table won't exist and `routeAgentMessage`'s permission
@@ -407,6 +418,38 @@ export function registerDeliveryAction(action: string, handler: DeliveryActionHa
  * These are written to messages_out because the container can't write to inbound.db.
  * The host applies them to inbound.db here.
  */
+
+async function handleSystemAlert(rawContent: string, session: Session): Promise<void> {
+  let parsed: { type: string; error?: string };
+  try {
+    parsed = JSON.parse(rawContent) as { type: string; error?: string };
+  } catch {
+    return;
+  }
+  if (parsed.type !== 'claude-auth-error') return;
+  if (!deliveryAdapter) return;
+
+  const last = authAlertedAt.get(session.agent_group_id) ?? 0;
+  if (Date.now() - last < AUTH_ALERT_COOLDOWN_MS) return;
+  authAlertedAt.set(session.agent_group_id, Date.now());
+
+  const approvers = pickApprover(session.agent_group_id);
+  const target = await pickApprovalDelivery(approvers, 'whatsapp');
+  if (!target) {
+    log.warn('Claude auth error: no approver DM channel found', { agentGroupId: session.agent_group_id });
+    return;
+  }
+
+  const { messagingGroup: mg } = target;
+  const text =
+    `⚠️ *Claude auth token expired* — agent \`${session.agent_group_id}\` cannot reach the API.\n\n` +
+    `Fix: \`bash setup/register-claude-token.sh\`\n\n` +
+    `Error: ${parsed.error ?? 'subscription access disabled'}`;
+
+  await deliveryAdapter.deliver(mg.channel_type, mg.platform_id, null, 'chat', JSON.stringify({ text }));
+  log.info('Claude auth error alert sent', { agentGroupId: session.agent_group_id, alertedUserId: target.userId });
+}
+
 async function handleSystemAction(
   content: Record<string, unknown>,
   session: Session,
